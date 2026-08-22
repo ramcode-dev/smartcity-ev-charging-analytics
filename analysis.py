@@ -1,95 +1,110 @@
+"""
+Smart City EV Charging Station Usage Analytics
+
+Author: Ram
+Description: Analysis of EV charging station transactions, peak usage hours, and revenue
+            distribution across smart city zones.
+"""
+
 import os
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATASET_DIR = os.path.join(BASE_DIR, "dataset")
-CHARTS_DIR = os.path.join(BASE_DIR, "charts")
+DATA_PATH = os.path.join(BASE_DIR, "dataset", "ev_charging_transactions.csv")
+CHART_PATH = os.path.join(BASE_DIR, "charts", "zone_revenue_breakdown.png")
 
-os.makedirs(DATASET_DIR, exist_ok=True)
-os.makedirs(CHARTS_DIR, exist_ok=True)
 
-csv_path = os.path.join(DATASET_DIR, "ev_charging_transactions.csv")
+def process_ev_data(filepath):
+    df = pd.read_csv(filepath)
 
-if not os.path.exists(csv_path):
-    import generate_data
+    # Recalculate missing transaction amounts from kWh consumed (rate: 15 INR / kWh)
+    df["Total_Amount_INR"] = pd.to_numeric(df["Total_Amount_INR"], errors="coerce")
+    df["Total_Amount_INR"] = df["Total_Amount_INR"].fillna(df["Energy_Consumed_kWh"] * 15.0).round(2)
 
-print("==================================================================")
-print("  PROJECT 3: SMART CITY EV CHARGING STATION USAGE ANALYTICS")
-print("==================================================================")
+    # Fill missing payment methods
+    df["Payment_Method"] = df["Payment_Method"].fillna("Unknown").replace({"": "Unknown"})
 
-# 1. Load Raw Dataset
-df = pd.read_csv(csv_path)
-print(f"\n[STEP 1] Loaded raw EV charging dataset from {csv_path}: {len(df)} records found.")
+    # Parse timestamps and extract hour of day
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+    df["Hour_Of_Day"] = df["Timestamp"].dt.hour
 
-# 2. Data Cleaning
-print("\n[STEP 2] Performing Data Cleaning & Imputation...")
-df['Total_Amount_INR'] = pd.to_numeric(df['Total_Amount_INR'], errors='coerce')
-df['Total_Amount_INR'] = df['Total_Amount_INR'].fillna(df['Energy_Consumed_kWh'] * 15.0).round(2)
+    return df
 
-df['Payment_Method'] = df['Payment_Method'].fillna('UNKNOWN')
-df['Payment_Method'] = df['Payment_Method'].replace({'': 'UNKNOWN'})
 
-df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-df['Hour_Of_Day'] = df['Timestamp'].dt.hour
-print("Data Cleaning Complete. Missing billing amounts recalculated & Hour of Day extracted.")
+def execute_sql_insights(df):
+    conn = sqlite3.connect(":memory:")
+    df.to_sql("ev_transactions", conn, index=False, if_exists="replace")
 
-# 3. SQL Analytics
-print("\n[STEP 3] Running SQL Analytics using SQLite Database...")
-conn = sqlite3.connect(":memory:")
-df.to_sql("ev_transactions", conn, index=False, if_exists="replace")
+    query_zone = """
+    SELECT 
+        Zone,
+        COUNT(*) AS Total_Sessions,
+        SUM(CASE WHEN Transaction_Status = 'SUCCESS' THEN 1 ELSE 0 END) AS Successful_Sessions,
+        ROUND(SUM(Energy_Consumed_kWh), 1) AS Energy_kWh,
+        ROUND(SUM(Total_Amount_INR), 2) AS Revenue_INR
+    FROM ev_transactions
+    GROUP BY Zone
+    ORDER BY Revenue_INR DESC;
+    """
 
-query_zone = """
-SELECT 
-    Zone,
-    COUNT(*) AS Total_Sessions,
-    SUM(CASE WHEN Transaction_Status = 'SUCCESS' THEN 1 ELSE 0 END) AS Successful_Sessions,
-    ROUND(SUM(Energy_Consumed_kWh), 1) AS Total_Energy_kWh,
-    ROUND(SUM(Total_Amount_INR), 2) AS Total_Revenue_INR
-FROM ev_transactions
-GROUP BY Zone
-ORDER BY Total_Revenue_INR DESC;
-"""
-df_zone_result = pd.read_sql_query(query_zone, conn)
-print("\n--- SQL Query Result: Zone-wise Revenue & Energy Summary ---")
-print(df_zone_result.to_string(index=False))
+    query_peak = """
+    SELECT 
+        Hour_Of_Day,
+        COUNT(*) AS Sessions_Count,
+        ROUND(AVG(Charging_Duration_Mins), 1) AS Avg_Duration_Mins,
+        ROUND(SUM(Total_Amount_INR), 2) AS Revenue_INR
+    FROM ev_transactions
+    WHERE Transaction_Status = 'SUCCESS'
+    GROUP BY Hour_Of_Day
+    ORDER BY Sessions_Count DESC;
+    """
 
-query_peak = """
-SELECT 
-    Hour_Of_Day,
-    COUNT(*) AS Charging_Sessions,
-    ROUND(AVG(Charging_Duration_Mins), 1) AS Avg_Duration_Mins,
-    ROUND(SUM(Total_Amount_INR), 2) AS Total_Hourly_Revenue
-FROM ev_transactions
-WHERE Transaction_Status = 'SUCCESS'
-GROUP BY Hour_Of_Day
-ORDER BY Charging_Sessions DESC;
-"""
-df_peak_result = pd.read_sql_query(query_peak, conn)
-print("\n--- SQL Query Result: Peak Charging Hours Breakdown ---")
-print(df_peak_result.to_string(index=False))
+    zone_summary = pd.read_sql_query(query_zone, conn)
+    peak_hours = pd.read_sql_query(query_peak, conn)
+    conn.close()
 
-# 4. Data Visualization
-print("\n[STEP 4] Generating Data Visualization Chart...")
-plt.figure(figsize=(9, 5))
-zone_rev = df.groupby('Zone')['Total_Amount_INR'].sum().sort_values(ascending=True)
+    return zone_summary, peak_hours
 
-zone_rev.plot(kind='barh', color='#3498db', edgecolor='black', alpha=0.85, figsize=(9, 5))
-plt.title("Total Revenue (INR) Generated Across Smart City Zones", fontsize=12, fontweight='bold')
-plt.xlabel("Total Revenue (INR)", fontsize=10)
-plt.ylabel("Smart City Zone", fontsize=10)
-plt.grid(axis='x', linestyle='--', alpha=0.7)
 
-for idx, val in enumerate(zone_rev):
-    plt.text(val + 100, idx, f"₹{val:,.0f}", va='center', fontweight='bold')
+def plot_revenue_by_zone(df, output_path):
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-plt.tight_layout()
-chart_path = os.path.join(CHARTS_DIR, "zone_revenue_breakdown.png")
-plt.savefig(chart_path, dpi=300)
-plt.close()
-print(f"Chart saved successfully at: {chart_path}")
+    zone_rev = df.groupby("Zone")["Total_Amount_INR"].sum().sort_values(ascending=True)
 
-print("\n==================================================================")
-print("  PROJECT 3 ANALYSIS COMPLETE! Output generated successfully.")
-print("==================================================================")
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    zone_rev.plot(kind="barh", color="#337ab7", ax=ax, edgecolor="#2e6da4", alpha=0.85)
+
+    ax.set_title("Total Revenue (INR) Generated per Smart City Zone", fontsize=11, fontweight="bold")
+    ax.set_xlabel("Revenue (INR)", fontsize=9)
+    ax.set_ylabel("Zone", fontsize=9)
+    plt.grid(axis="x", linestyle=":", alpha=0.6)
+
+    for i, val in enumerate(zone_rev):
+        ax.text(val + 150, i, f"₹{val:,.0f}", va="center", fontsize=8.5)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+
+def main():
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(f"Missing dataset at {DATA_PATH}")
+
+    df = process_ev_data(DATA_PATH)
+    zone_df, peak_df = execute_sql_insights(df)
+
+    print("--- Zone Revenue & Session Summary ---")
+    print(zone_df.to_string(index=False))
+
+    print("\n--- Peak Hourly Utilization ---")
+    print(peak_df.to_string(index=False))
+
+    plot_revenue_by_zone(df, CHART_PATH)
+    print(f"\nSaved revenue chart to {CHART_PATH}")
+
+
+if __name__ == "__main__":
+    main()

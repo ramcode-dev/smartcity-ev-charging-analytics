@@ -1,33 +1,30 @@
--- ====================================================================
--- PROJECT 3: SMART CITY EV CHARGING STATION USAGE ANALYTICS
--- SQL QUERIES FOR REVENUE & UTILIZATION METRICS
--- ====================================================================
+-- Smart City EV Charging Usage Analytics Queries
 
--- 1. Zone-wise Revenue & Energy Consumption Breakdown
+-- 1. Zone revenue and total energy consumption summary
 SELECT 
     Zone,
     COUNT(*) AS Total_Sessions,
     SUM(CASE WHEN Transaction_Status = 'SUCCESS' THEN 1 ELSE 0 END) AS Successful_Sessions,
-    ROUND(SUM(Energy_Consumed_kWh), 1) AS Total_Energy_kWh,
-    ROUND(SUM(Total_Amount_INR), 2) AS Total_Revenue_INR
+    ROUND(SUM(Energy_Consumed_kWh), 1) AS Energy_kWh,
+    ROUND(SUM(Total_Amount_INR), 2) AS Revenue_INR
 FROM ev_transactions
 GROUP BY Zone
-ORDER BY Total_Revenue_INR DESC;
+ORDER BY Revenue_INR DESC;
 
 
--- 2. Peak Charging Hours & Hourly Utilization Analysis
+-- 2. Peak hourly charging sessions and duration analysis
 SELECT 
     Hour_Of_Day,
-    COUNT(*) AS Charging_Sessions,
+    COUNT(*) AS Sessions_Count,
     ROUND(AVG(Charging_Duration_Mins), 1) AS Avg_Duration_Mins,
-    ROUND(SUM(Total_Amount_INR), 2) AS Total_Hourly_Revenue
+    ROUND(SUM(Total_Amount_INR), 2) AS Revenue_INR
 FROM ev_transactions
 WHERE Transaction_Status = 'SUCCESS'
 GROUP BY Hour_Of_Day
-ORDER BY Charging_Sessions DESC;
+ORDER BY Sessions_Count DESC;
 
 
--- 3. Station Downtime & Failed Payment Analysis
+-- 3. Hardware fault and payment failure rate per station
 SELECT 
     Station_ID,
     Zone,
