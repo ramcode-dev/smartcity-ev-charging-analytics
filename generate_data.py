@@ -1,9 +1,16 @@
+import os
 import csv
 import random
 from datetime import datetime, timedelta
 
-# Create synthetic EV charging station log dataset
 random.seed(202)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASET_DIR = os.path.join(BASE_DIR, "dataset")
+CHARTS_DIR = os.path.join(BASE_DIR, "charts")
+
+os.makedirs(DATASET_DIR, exist_ok=True)
+os.makedirs(CHARTS_DIR, exist_ok=True)
 
 zones = ["North Zone - Tech Park", "South Zone - Residential", "East Zone - Commercial Hub", "West Zone - Highway Corridor", "Central Zone - Metro Station"]
 payment_methods = ["UPI / QR", "Credit Card", "RFID Card", "Mobile Wallet", ""]
@@ -18,15 +25,12 @@ for i in range(1, 121):
     zone = random.choice(zones)
     duration = random.randint(15, 180)
     
-    # Energy consumed roughly 0.2 to 0.4 kWh per minute
     energy = round(duration * random.uniform(0.2, 0.4), 2)
-    # Rate: 15 INR per kWh
     amount = round(energy * 15.0, 2)
     
     pay_method = random.choice(payment_methods)
     status = random.choice(statuses)
     
-    # Corrupt some transaction amounts for cleaning demo
     if i % 10 == 0:
         amount = ""
         
@@ -37,11 +41,8 @@ for i in range(1, 121):
     
     rows.append([tx_id, station_id, zone, duration, energy, amount, pay_method, status, timestamp])
 
-import os
-os.makedirs("dataset", exist_ok=True)
-os.makedirs("charts", exist_ok=True)
+file_path = os.path.join(DATASET_DIR, "ev_charging_transactions.csv")
 
-file_path = "dataset/ev_charging_transactions.csv"
 with open(file_path, mode="w", newline="", encoding="utf-8") as file:
     writer = csv.writer(file)
     writer.writerow(header)
